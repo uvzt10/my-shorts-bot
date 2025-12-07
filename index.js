@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// TelegramToYouTube - Random Daily Picker
-// الميزة: يخزن كل شيء، وعند الساعة 6 نيويورك يختار فيديو عشوائي وينشره
+// TelegramToYouTube - Manual Trigger Edition
+// الميزة: تخزين + نشر تلقائي (6م) + نشر يدوي بكلمة سر
 
 const express = require('express');
 const { Telegraf } = require('telegraf');
@@ -10,6 +10,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const moment = require('moment-timezone');
+const { exec } = require('child_process');
 
 // ====================
 // الإعدادات
@@ -32,25 +33,118 @@ const drive = google.drive({ version: 'v3', auth: oauth2Client });
 const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 
 const userSessions = new Map();
-const STORAGE_FOLDER_NAME = 'Random_Shorts_Storage'; // مجلد التخزين
-const LOGS_FOLDER_NAME = 'Daily_Upload_Logs'; // سجلات لمنع التكرار اليومي
+const STORAGE_FOLDER_NAME = 'Random_Shorts_Storage'; 
+const LOGS_FOLDER_NAME = 'Daily_Upload_Logs'; 
 
 // ====================
-// 1. قسم التخزين (يعمل 24 ساعة)
+// دوال المعالجة
+// ====================
+
+function convertToShorts(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    console.log('🎬 Starting FFmpeg conversion...');
+    const command = `ffmpeg -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset veryfast -c:a aac "${outputPath}"`;
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`❌ FFmpeg Error: ${error.message}`);
+        reject(error);
+      } else {
+        resolve(outputPath);
+      }
+    });
+  });
+}
+
+// ====================
+// 1. أوامر البوت (التخزين + الطوارئ)
 // ====================
 
 bot.start((ctx) => {
   ctx.reply(
-    '🎲 *نظام النشر العشوائي*\n\n' +
-    'أرسل فيديوهاتك في أي وقت لتخزينها في Google Drive.\n' +
-    'الساعة 6 مساءً (بتوقيت نيويورك)، سأختار *فيديو واحد عشوائياً* وأنشرة.\n\n' +
-    '📝 أرسل العنوان والوصف أولاً، ثم الفيديو.',
+    '🏭 *نظام النشر المزدوج*\n\n' +
+    '1️⃣ أرسل الفيديوهات للتخزين والجدولة التلقائية.\n' +
+    '2️⃣ أرسل كلمة `nnz_vedio` للنشر الفوري (تجاوز الوقت).\n\n' +
+    '👇 أرسل العنوان والوصف أولاً.',
     { parse_mode: 'Markdown' }
   );
 });
 
+// 🔥 زر الطوارئ (النشر الفوري) 🔥
+bot.hears('nnz_vedio', async (ctx) => {
+  const msg = await ctx.reply('🚨 استلمت أمر النشر الفوري! جاري سحب فيديو عشوائي من الخزنة...');
+
+  try {
+    const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
+    
+    // جلب القائمة
+    const listRes = await drive.files.list({
+      q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
+      fields: 'files(id, name, description)',
+      pageSize: 100
+    });
+
+    const files = listRes.data.files;
+    if (!files || files.length === 0) {
+      return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '⚠️ الخزنة فارغة! أرسل فيديوهات أولاً.');
+    }
+
+    // اختيار عشوائي
+    const randomIndex = Math.floor(Math.random() * files.length);
+    const randomFile = files[randomIndex];
+    
+    // استخراج البيانات
+    let metadata = { title: 'Random Short', description: '', hashtags: '' };
+    if (randomFile.description) {
+      try { metadata = JSON.parse(randomFile.description); } catch(e) {}
+    }
+
+    // تجهيز النصوص
+    let finalTitle = metadata.title;
+    if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #shorts';
+
+    const staticDescription = 
+      "Satisfying cutting / weird objects / anime edits.\n" +
+      "#shorts #satisfying #asmr #cutting #oddly_satisfying";
+
+    let fullDescription = `${finalTitle}\n\n${metadata.description}\n\n${staticDescription}`.trim();
+    const staticTags = ["shorts", "satisfying", "asmr", "cutting", "fruits", "relaxing"];
+
+    // الرفع
+    const driveStream = await drive.files.get({ fileId: randomFile.id, alt: 'media' }, { responseType: 'stream' });
+
+    await youtube.videos.insert({
+      part: 'snippet,status',
+      requestBody: {
+        snippet: {
+          title: finalTitle,
+          description: fullDescription,
+          categoryId: '24',
+          tags: staticTags
+        },
+        status: {
+          privacyStatus: 'public', // علني فوراً
+          selfDeclaredMadeForKids: false
+        }
+      },
+      media: { body: driveStream.data }
+    });
+
+    // الحذف من درايف
+    await drive.files.delete({ fileId: randomFile.id });
+
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ **تم النشر الفوري بنجاح!**\n🎬 ${finalTitle}`, { parse_mode: 'Markdown' });
+
+  } catch (error) {
+    console.error('Manual Upload Error:', error);
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل النشر: ${error.message}`);
+  }
+});
+
 // استقبال المعلومات
 bot.on('text', (ctx) => {
+  // نتجاهل كلمة السر حتى لا يعتبرها عنواناً
+  if (ctx.message.text === 'nnz_vedio') return;
+
   const userId = ctx.from.id;
   const text = ctx.message.text;
 
@@ -60,113 +154,106 @@ bot.on('text', (ctx) => {
 
   if (titleMatch || descMatch || hashtagsMatch) {
     const sessionData = {
-      title: titleMatch ? titleMatch[1].trim() : 'Random Short',
+      title: titleMatch ? titleMatch[1].trim() : 'Satisfying Video',
       description: descMatch ? descMatch[1].trim() : '',
-      hashtags: hashtagsMatch ? hashtagsMatch[1].trim() : ''
+      hashtags: hashtagsMatch ? hashtagsMatch[1].trim() : '' 
     };
     userSessions.set(userId, sessionData);
-    ctx.reply('✅ تم حفظ البيانات! أرسل الفيديو الآن لإضافته للخزنة 📥');
+    ctx.reply('✅ تم حفظ البيانات! أرسل الفيديو الآن 📥');
   } else {
-    ctx.reply('⚠️ أرسل المعلومات أولاً (العنوان، الوصف...).');
+    ctx.reply('⚠️ أرسل المعلومات أولاً.');
   }
 });
 
-// استقبال الفيديو وتخزينه
+// استقبال الفيديو (المعالجة والتخزين)
 bot.on('video', async (ctx) => {
   const userId = ctx.from.id;
   let sessionData = userSessions.get(userId);
-  if (!sessionData) sessionData = { title: 'Random Short', description: '', hashtags: '#Shorts' };
+  if (!sessionData) sessionData = { title: 'Satisfying Cutting Video', description: '', hashtags: '' };
 
   const video = ctx.message.video;
-  const msg = await ctx.reply('☁️ جاري التخزين في الخزنة السحابية...');
+  const msg = await ctx.reply('⏳ جاري التحميل والمعالجة (FFmpeg)...');
 
   try {
     const fileLink = await ctx.telegram.getFileLink(video.file_id);
-    const localPath = await downloadVideo(fileLink.href, video.file_id);
-    const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
+    const originalPath = await downloadVideo(fileLink.href, `raw_${video.file_id}`);
+    const processedPath = path.join(__dirname, 'temp', `processed_${video.file_id}.mp4`);
 
-    // تخزين المعلومات داخل وصف الملف في Drive
+    await convertToShorts(originalPath, processedPath);
+
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '☁️ جاري الرفع للخزنة...');
+    const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
     const metadataString = JSON.stringify(sessionData);
     
     await drive.files.create({
       resource: {
-        name: `STORED_${Date.now()}.mp4`,
+        name: `READY_${Date.now()}.mp4`,
         parents: [folderId],
-        description: metadataString // حفظنا العنوان والوصف هنا
+        description: metadataString
       },
-      media: { mimeType: 'video/mp4', body: fs.createReadStream(localPath) },
+      media: { mimeType: 'video/mp4', body: fs.createReadStream(processedPath) },
       fields: 'id'
     });
 
-    fs.unlinkSync(localPath); // حذف محلي
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم تأمين الفيديو في الخزنة! سيتم اختياره عشوائياً في المستقبل.');
+    fs.unlinkSync(originalPath);
+    fs.unlinkSync(processedPath);
+
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بنجاح!');
     
   } catch (error) {
     console.error(error);
-    ctx.reply('❌ فشل التخزين');
+    ctx.reply(`❌ حدث خطأ: ${error.message}`);
   }
 });
 
 // ====================
-// 2. المحرك الزمني (يفحصه الـ Cron Job كل 5 دقائق)
+// 2. المحرك الزمني (6 مساءً نيويورك)
 // ====================
 
 app.get('/cron-check', async (req, res) => {
   const nowNY = moment().tz("America/New_York");
-  const currentHour = nowNY.hour(); // الساعة 18 = 6 مساءً
+  const currentHour = nowNY.hour(); 
   const todayDate = nowNY.format('YYYY-MM-DD');
 
   console.log(`⏰ Time Check: ${nowNY.format('h:mm A')} NY`);
 
-  // الشرط 1: هل الساعة 6 مساءً؟
   if (currentHour !== 18) {
     return res.send(`💤 Not time yet. (Current: ${currentHour}:00)`);
   }
 
-  // الشرط 2: هل نشرنا اليوم؟
   const uploadedToday = await checkIfUploadedToday(todayDate);
   if (uploadedToday) {
-    return res.send(`✅ Already published today (${todayDate}). See you tomorrow!`);
+    return res.send(`✅ Already published today (${todayDate}).`);
   }
 
-  // الشرط 3: وقت النشر! لنختار فيديو عشوائي
   console.log('🎲 It is 6 PM! Picking a random video...');
   
+  // نفس منطق النشر اليدوي يتكرر هنا للتلقائي
   try {
     const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
-    
-    // جلب قائمة كل الفيديوهات
     const listRes = await drive.files.list({
       q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
       fields: 'files(id, name, description)',
-      pageSize: 100 // يمكن زيادته إذا كان لديك فيديوهات أكثر
+      pageSize: 100
     });
 
     const files = listRes.data.files;
+    if (!files || files.length === 0) return res.send('⚠️ Storage is empty!');
 
-    if (!files || files.length === 0) {
-      return res.send('⚠️ Storage is empty! No videos to pick.');
-    }
-
-    // === 🎲 السحر هنا: اختيار عشوائي ===
     const randomIndex = Math.floor(Math.random() * files.length);
     const randomFile = files[randomIndex];
     
-    console.log(`🎯 Randomly selected: ${randomFile.name}`);
-
-    // استخراج البيانات
     let metadata = { title: 'Random Short', description: '', hashtags: '' };
     if (randomFile.description) {
       try { metadata = JSON.parse(randomFile.description); } catch(e) {}
     }
 
-    // تجهيز النصوص
     let finalTitle = metadata.title;
-    if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #Shorts';
-    let fullDescription = `${metadata.description}\n\n${metadata.hashtags}`.trim();
-    if (!fullDescription.toLowerCase().includes('#shorts')) fullDescription += ' #Shorts';
+    if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #shorts';
+    const staticDescription = "Satisfying cutting / weird objects / anime edits.\n#shorts #satisfying #asmr #cutting #oddly_satisfying";
+    let fullDescription = `${finalTitle}\n\n${metadata.description}\n\n${staticDescription}`.trim();
+    const staticTags = ["shorts", "satisfying", "asmr", "cutting", "fruits", "relaxing"];
 
-    // تحميل ورفع
     const driveStream = await drive.files.get({ fileId: randomFile.id, alt: 'media' }, { responseType: 'stream' });
 
     await youtube.videos.insert({
@@ -175,26 +262,22 @@ app.get('/cron-check', async (req, res) => {
         snippet: {
           title: finalTitle,
           description: fullDescription,
-          categoryId: '22',
-          tags: ["Shorts", "Vertical"]
+          categoryId: '24',
+          tags: staticTags
         },
-        status: {
-          privacyStatus: 'public', // نشر علني مباشر
-          selfDeclaredMadeForKids: false
-        }
+        status: { privacyStatus: 'public', selfDeclaredMadeForKids: false }
       },
       media: { body: driveStream.data }
     });
 
-    // التنظيف: حذف الفيديو + تسجيل اليوم
     await drive.files.delete({ fileId: randomFile.id });
     await createLogFile(todayDate); 
 
-    res.send(`🎉 SUCCESS! Published random video: ${finalTitle}`);
+    res.send(`🎉 SUCCESS! Published: ${finalTitle}`);
 
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).send('Error during random upload');
+    res.status(500).send('Error during upload');
   }
 });
 
@@ -235,10 +318,10 @@ async function getOrCreateFolder(folderName) {
   return folder.data.id;
 }
 
-async function downloadVideo(url, fileId) {
+async function downloadVideo(url, fileName) {
   const tempDir = path.join(__dirname, 'temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-  const videoPath = path.join(tempDir, `${fileId}.mp4`);
+  const videoPath = path.join(tempDir, `${fileName}.mp4`);
   const response = await axios({ method: 'GET', url: url, responseType: 'stream' });
   const writer = fs.createWriteStream(videoPath);
   response.data.pipe(writer);
@@ -257,7 +340,7 @@ app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.handleUpdate(req.body);
   res.sendStatus(200);
 });
-app.get('/', (req, res) => res.send('Random Storage Bot is Alive 🎲'));
+app.get('/', (req, res) => res.send('Bot is Alive (Replica Edition + Manual Trigger) 🤖'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {

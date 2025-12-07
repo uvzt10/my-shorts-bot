@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// TelegramToYouTube - UltraFast Edition
-// تم التعديل: استخدام preset ultrafast لتناسب سيرفرات ريندر الضعيفة
+// TelegramToYouTube - High Quality Balanced Edition
+// تم التعديل: توازن ذكي بين السرعة والجودة (HD) ليعمل على Render بدون مشاكل
 
 const express = require('express');
 const { Telegraf } = require('telegraf');
@@ -37,24 +37,26 @@ const STORAGE_FOLDER_NAME = 'Random_Shorts_Storage';
 const LOGS_FOLDER_NAME = 'Daily_Upload_Logs'; 
 
 // ====================
-// دوال المعالجة (مسرعة جداً)
+// دوال المعالجة (جودة عالية HD + سرعة)
 // ====================
 
 function convertToShorts(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    console.log('🎬 Starting FFmpeg conversion (UltraFast Mode)...');
+    console.log('🎬 Starting FFmpeg conversion (High Quality Mode)...');
     
-    // التعديل هنا: غيرنا preset من veryfast إلى ultrafast
-    // وأضفنا tune zerolatency للمعالجة الفورية
-    const command = `"${ffmpegPath}" -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac "${outputPath}"`;
+    // التعديل السحري: 
+    // -preset superfast: سريع ولكن يحافظ على الجودة
+    // -crf 23: جودة عالية (HD)
+    // -maxrate 5M: تحكم في البت ريت لمنع انفجار السيرفر
+    const command = `"${ffmpegPath}" -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset superfast -crf 23 -maxrate 5M -bufsize 10M -c:a aac "${outputPath}"`;
     
-    // زيادة حجم البفر لمنع تعليق العملية
-    exec(command, { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
+    // ذاكرة مؤقتة كبيرة للأمان
+    exec(command, { maxBuffer: 1024 * 1024 * 60 }, (error, stdout, stderr) => {
       if (error) {
         console.error(`❌ FFmpeg Error: ${error.message}`);
         reject(error);
       } else {
-        console.log('✅ FFmpeg conversion complete!');
+        console.log('✅ Conversion Done (HD)!');
         resolve(outputPath);
       }
     });
@@ -67,9 +69,9 @@ function convertToShorts(inputPath, outputPath) {
 
 bot.start((ctx) => {
   ctx.reply(
-    '🏭 *بوت الشورتس السريع*\n\n' +
-    '🚀 تم تفعيل وضع السرعة القصوى (UltraFast).\n' +
-    '📥 أرسل الفيديو وسيتم معالجته بسرعة لتجنب التايم أوت.\n' +
+    '🏭 *بوت الشورتس (نسخة الجودة HD)*\n\n' +
+    '✨ تم تحسين إعدادات القص لتكون واضحة وعالية الدقة.\n' +
+    '📥 أرسل الفيديو للتخزين والمعالجة.\n' +
     '👇 أرسل العنوان والوصف أولاً.',
     { parse_mode: 'Markdown' }
   );
@@ -174,15 +176,14 @@ bot.on('video', async (ctx) => {
   if (!sessionData) sessionData = { title: 'Satisfying Video', description: '', hashtags: '' };
 
   const video = ctx.message.video;
-  // الرد السريع لتجنب إعادة المحاولة من تليجرام
-  const msg = await ctx.reply('⏳ بدأت المعالجة السريعة...');
+  const msg = await ctx.reply('⏳ جاري المعالجة (جودة HD)...');
 
   try {
     const fileLink = await ctx.telegram.getFileLink(video.file_id);
     const originalPath = await downloadVideo(fileLink.href, `raw_${video.file_id}`);
     const processedPath = path.join(__dirname, 'temp', `processed_${video.file_id}.mp4`);
 
-    // المعالجة السريعة
+    // المعالجة بالجودة الجديدة
     await convertToShorts(originalPath, processedPath);
 
     await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '☁️ رفع للدرايف...');
@@ -202,14 +203,14 @@ bot.on('video', async (ctx) => {
     fs.unlinkSync(originalPath);
     fs.unlinkSync(processedPath);
 
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بنجاح!');
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بنجاح (HD)!');
   } catch (error) {
     console.error(error);
     // محاولة تنظيف الملفات في حال الخطأ
     try { if(fs.existsSync(originalPath)) fs.unlinkSync(originalPath); } catch(e){}
     try { if(fs.existsSync(processedPath)) fs.unlinkSync(processedPath); } catch(e){}
     
-    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل: السيرفر بطيء جداً أو الفيديو كبير.`);
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل: قد يكون الفيديو كبيراً جداً على السيرفر المجاني.`);
   }
 });
 
@@ -309,7 +310,7 @@ app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.handleUpdate(req.body);
   res.sendStatus(200);
 });
-app.get('/', (req, res) => res.send('Bot is Alive (UltraFast) ⚡'));
+app.get('/', (req, res) => res.send('Bot is Alive (HD Mode) ✨'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {

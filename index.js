@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// TelegramToYouTube - Manual Trigger Edition
-// الميزة: تخزين + نشر تلقائي (6م) + نشر يدوي بكلمة سر
+// TelegramToYouTube - /Sher Edition
+// التعديل: تغيير أمر النشر الطوارئ إلى /Sher
 
 const express = require('express');
 const { Telegraf } = require('telegraf');
@@ -11,10 +11,6 @@ const fs = require('fs');
 const path = require('path');
 const moment = require('moment-timezone');
 const { exec } = require('child_process');
-
-// ====================
-// الإعدادات
-// ====================
 
 const app = express();
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -37,7 +33,7 @@ const STORAGE_FOLDER_NAME = 'Random_Shorts_Storage';
 const LOGS_FOLDER_NAME = 'Daily_Upload_Logs'; 
 
 // ====================
-// دوال المعالجة
+// دوال المعالجة (FFmpeg)
 // ====================
 
 function convertToShorts(inputPath, outputPath) {
@@ -56,27 +52,69 @@ function convertToShorts(inputPath, outputPath) {
 }
 
 // ====================
-// 1. أوامر البوت (التخزين + الطوارئ)
+// أوامر البوت
 // ====================
 
 bot.start((ctx) => {
   ctx.reply(
-    '🏭 *نظام النشر المزدوج*\n\n' +
-    '1️⃣ أرسل الفيديوهات للتخزين والجدولة التلقائية.\n' +
-    '2️⃣ أرسل كلمة `nnz_vedio` للنشر الفوري (تجاوز الوقت).\n\n' +
+    '🏭 *لوحة التحكم*\n\n' +
+    '📥 أرسل الفيديو للتخزين.\n' +
+    '📋 اكتب `/list` لعرض الفيديوهات المنتظرة.\n' +
+    '🚨 اكتب `/Sher` للنشر الفوري (تجاوز الوقت).\n\n' +
     '👇 أرسل العنوان والوصف أولاً.',
     { parse_mode: 'Markdown' }
   );
 });
 
-// 🔥 زر الطوارئ (النشر الفوري) 🔥
-bot.hears('nnz_vedio', async (ctx) => {
-  const msg = await ctx.reply('🚨 استلمت أمر النشر الفوري! جاري سحب فيديو عشوائي من الخزنة...');
-
+// 🔥 القائمة (تعرض فقط الموجود في الخزنة) 🔥
+bot.command('list', async (ctx) => {
+  const msg = await ctx.reply('🔍 جاري فحص قائمة الانتظار...');
   try {
     const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
+    const listRes = await drive.files.list({
+      q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
+      fields: 'files(id, name, description)',
+      pageSize: 50
+    });
+
+    const files = listRes.data.files;
+    const count = files.length;
+
+    if (count === 0) {
+      return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '📦 **الخزنة فارغة!**\nلا توجد فيديوهات تنتظر النشر.', { parse_mode: 'Markdown' });
+    }
+
+    let message = `📦 *قائمة الفيديوهات المحفوظة (${count}):*\n_هذه الفيديوهات لم تنشر بعد_\n\n`;
     
-    // جلب القائمة
+    files.forEach((file, index) => {
+      let title = "بدون عنوان";
+      if (file.description) {
+        try { 
+          const meta = JSON.parse(file.description);
+          title = meta.title;
+        } catch(e) {
+            title = file.name;
+        }
+      }
+      message += `${index + 1}. 🎬 ${title}\n`;
+    });
+
+    message += `\n⏳ (الفيديوهات المنشورة تم حذفها تلقائياً من القائمة)`;
+    if (message.length > 4000) message = message.substring(0, 4000) + '...';
+
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, message, { parse_mode: 'Markdown' });
+
+  } catch (error) {
+    console.error(error);
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ خطأ: ${error.message}`);
+  }
+});
+
+// 🔥 زر الطوارئ الجديد (/Sher) 🔥
+bot.command('Sher', async (ctx) => {
+  const msg = await ctx.reply('🚨 أمر نشر فوري (/Sher)! جاري السحب العشوائي...');
+  try {
+    const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
     const listRes = await drive.files.list({
       q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
       fields: 'files(id, name, description)',
@@ -85,31 +123,23 @@ bot.hears('nnz_vedio', async (ctx) => {
 
     const files = listRes.data.files;
     if (!files || files.length === 0) {
-      return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '⚠️ الخزنة فارغة! أرسل فيديوهات أولاً.');
+      return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '⚠️ الخزنة فارغة!');
     }
 
-    // اختيار عشوائي
     const randomIndex = Math.floor(Math.random() * files.length);
     const randomFile = files[randomIndex];
     
-    // استخراج البيانات
     let metadata = { title: 'Random Short', description: '', hashtags: '' };
     if (randomFile.description) {
       try { metadata = JSON.parse(randomFile.description); } catch(e) {}
     }
 
-    // تجهيز النصوص
     let finalTitle = metadata.title;
     if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #shorts';
-
-    const staticDescription = 
-      "Satisfying cutting / weird objects / anime edits.\n" +
-      "#shorts #satisfying #asmr #cutting #oddly_satisfying";
-
+    const staticDescription = "Satisfying cutting / weird objects / anime edits.\n#shorts #satisfying #asmr #cutting #oddly_satisfying";
     let fullDescription = `${finalTitle}\n\n${metadata.description}\n\n${staticDescription}`.trim();
     const staticTags = ["shorts", "satisfying", "asmr", "cutting", "fruits", "relaxing"];
 
-    // الرفع
     const driveStream = await drive.files.get({ fileId: randomFile.id, alt: 'media' }, { responseType: 'stream' });
 
     await youtube.videos.insert({
@@ -121,29 +151,26 @@ bot.hears('nnz_vedio', async (ctx) => {
           categoryId: '24',
           tags: staticTags
         },
-        status: {
-          privacyStatus: 'public', // علني فوراً
-          selfDeclaredMadeForKids: false
-        }
+        status: { privacyStatus: 'public', selfDeclaredMadeForKids: false }
       },
       media: { body: driveStream.data }
     });
 
-    // الحذف من درايف
+    // الحذف الحتمي
     await drive.files.delete({ fileId: randomFile.id });
-
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ **تم النشر الفوري بنجاح!**\n🎬 ${finalTitle}`, { parse_mode: 'Markdown' });
+    
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ **تم النشر الفوري!**\n🎬 ${finalTitle}`, { parse_mode: 'Markdown' });
 
   } catch (error) {
     console.error('Manual Upload Error:', error);
-    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل النشر: ${error.message}`);
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل: ${error.message}`);
   }
 });
 
 // استقبال المعلومات
 bot.on('text', (ctx) => {
-  // نتجاهل كلمة السر حتى لا يعتبرها عنواناً
-  if (ctx.message.text === 'nnz_vedio') return;
+  // نتجاهل الأوامر حتى لا يعتبرها عناوين
+  if (ctx.message.text.startsWith('/')) return;
 
   const userId = ctx.from.id;
   const text = ctx.message.text;
@@ -165,14 +192,14 @@ bot.on('text', (ctx) => {
   }
 });
 
-// استقبال الفيديو (المعالجة والتخزين)
+// استقبال الفيديو (تخزين ومعالجة)
 bot.on('video', async (ctx) => {
   const userId = ctx.from.id;
   let sessionData = userSessions.get(userId);
   if (!sessionData) sessionData = { title: 'Satisfying Cutting Video', description: '', hashtags: '' };
 
   const video = ctx.message.video;
-  const msg = await ctx.reply('⏳ جاري التحميل والمعالجة (FFmpeg)...');
+  const msg = await ctx.reply('⏳ جاري المعالجة (FFmpeg)...');
 
   try {
     const fileLink = await ctx.telegram.getFileLink(video.file_id);
@@ -198,7 +225,7 @@ bot.on('video', async (ctx) => {
     fs.unlinkSync(originalPath);
     fs.unlinkSync(processedPath);
 
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بنجاح!');
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم الحفظ في قائمة الانتظار!');
     
   } catch (error) {
     console.error(error);
@@ -207,15 +234,13 @@ bot.on('video', async (ctx) => {
 });
 
 // ====================
-// 2. المحرك الزمني (6 مساءً نيويورك)
+// المحرك الزمني (6 مساءً نيويورك)
 // ====================
 
 app.get('/cron-check', async (req, res) => {
   const nowNY = moment().tz("America/New_York");
   const currentHour = nowNY.hour(); 
   const todayDate = nowNY.format('YYYY-MM-DD');
-
-  console.log(`⏰ Time Check: ${nowNY.format('h:mm A')} NY`);
 
   if (currentHour !== 18) {
     return res.send(`💤 Not time yet. (Current: ${currentHour}:00)`);
@@ -225,10 +250,7 @@ app.get('/cron-check', async (req, res) => {
   if (uploadedToday) {
     return res.send(`✅ Already published today (${todayDate}).`);
   }
-
-  console.log('🎲 It is 6 PM! Picking a random video...');
   
-  // نفس منطق النشر اليدوي يتكرر هنا للتلقائي
   try {
     const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
     const listRes = await drive.files.list({
@@ -270,6 +292,7 @@ app.get('/cron-check', async (req, res) => {
       media: { body: driveStream.data }
     });
 
+    // الحذف الحتمي
     await drive.files.delete({ fileId: randomFile.id });
     await createLogFile(todayDate); 
 
@@ -340,7 +363,7 @@ app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.handleUpdate(req.body);
   res.sendStatus(200);
 });
-app.get('/', (req, res) => res.send('Bot is Alive (Replica Edition + Manual Trigger) 🤖'));
+app.get('/', (req, res) => res.send('Bot is Alive (/Sher Edition) 🤖'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {

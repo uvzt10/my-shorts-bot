@@ -190,10 +190,12 @@ async function uploadToYouTube(filePath, metadata) {
 }
 
 // ====================
-// الخادم
+// الخادم (مصحح)
 // ====================
 
 app.use(express.json());
+
+// استقبال التحديثات من تليجرام
 app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   bot.handleUpdate(req.body);
   res.sendStatus(200);
@@ -202,4 +204,17 @@ app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
 app.get('/', (req, res) => res.send('Bot is running with NYC Scheduler! 🗽'));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+// تشغيل السيرفر + ربط الويب هوك تلقائياً
+app.listen(PORT, async () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  
+  // هذه هي الخطوة التي كانت ناقصة:
+  try {
+    const webhookUrl = `${process.env.WEBHOOK_URL}/webhook/${process.env.TELEGRAM_BOT_TOKEN}`;
+    await bot.telegram.setWebhook(webhookUrl);
+    console.log(`✅ Webhook set to: ${webhookUrl}`);
+  } catch (err) {
+    console.error('❌ Failed to set webhook:', err);
+  }
+});

@@ -1,0 +1,80 @@
+# Dockerfile للتطبيق
+FROM node:18-alpine
+
+# تعيين مجلد العمل
+WORKDIR /app
+
+# نسخ ملفات package
+COPY package*.json ./
+
+# تثبيت الحزم
+RUN npm ci --only=production
+
+# نسخ باقي الملفات
+COPY . .
+
+# إنشاء مجلد temp للفيديوهات المؤقتة
+RUN mkdir -p temp
+
+# المنفذ المستخدم
+EXPOSE 3000
+
+# تشغيل التطبيق
+CMD ["node", "index.js"]
+
+# ===========================================
+# docker-compose.yml (حفظ في ملف منفصل)
+# ===========================================
+
+# version: '3.8'
+# 
+# services:
+#   telegram-youtube-agent:
+#     build: .
+#     container_name: telegram-youtube-agent
+#     restart: unless-stopped
+#     ports:
+#       - "3000:3000"
+#     environment:
+#       - NODE_ENV=production
+#       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+#       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+#       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+#       - REDIRECT_URI=${REDIRECT_URI}
+#       - GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN}
+#       - PORT=3000
+#       - WEBHOOK_URL=${WEBHOOK_URL}
+#     volumes:
+#       - ./temp:/app/temp
+#     networks:
+#       - app-network
+# 
+# networks:
+#   app-network:
+#     driver: bridge
+
+# ===========================================
+# أوامر Docker
+# ===========================================
+
+# 1. بناء الصورة:
+# docker build -t telegram-youtube-agent .
+
+# 2. تشغيل الحاوية:
+# docker run -d \
+#   --name telegram-youtube-agent \
+#   -p 3000:3000 \
+#   --env-file .env \
+#   telegram-youtube-agent
+
+# 3. استخدام Docker Compose:
+# docker-compose up -d
+
+# 4. عرض السجلات:
+# docker logs -f telegram-youtube-agent
+
+# 5. إيقاف الحاوية:
+# docker-compose down
+
+# 6. إعادة البناء:
+# docker-compose up -d --build

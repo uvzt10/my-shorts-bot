@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// TelegramToYouTube - /Sher Edition
-// التعديل: تغيير أمر النشر الطوارئ إلى /Sher
+// TelegramToYouTube - Final Fixed Edition
+// يتضمن: ffmpeg-static (للقص في ريندر) + /Sher + /list + تخزين درايف
 
 const express = require('express');
 const { Telegraf } = require('telegraf');
@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const moment = require('moment-timezone');
 const { exec } = require('child_process');
+const ffmpegPath = require('ffmpeg-static'); // ✅ هذا هو السطر الناقص المهم
 
 const app = express();
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -33,13 +34,16 @@ const STORAGE_FOLDER_NAME = 'Random_Shorts_Storage';
 const LOGS_FOLDER_NAME = 'Daily_Upload_Logs'; 
 
 // ====================
-// دوال المعالجة (FFmpeg)
+// دوال المعالجة (FFmpeg Static)
 // ====================
 
 function convertToShorts(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     console.log('🎬 Starting FFmpeg conversion...');
-    const command = `ffmpeg -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset veryfast -c:a aac "${outputPath}"`;
+    
+    // ✅ هنا التعديل: نستخدم ffmpegPath بدلاً من الكلمة المجردة
+    const command = `"${ffmpegPath}" -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset veryfast -c:a aac "${outputPath}"`;
+    
     exec(command, (error, stdout, stderr) => {
       if (error) {
         console.error(`❌ FFmpeg Error: ${error.message}`);
@@ -57,10 +61,10 @@ function convertToShorts(inputPath, outputPath) {
 
 bot.start((ctx) => {
   ctx.reply(
-    '🏭 *لوحة التحكم*\n\n' +
-    '📥 أرسل الفيديو للتخزين.\n' +
+    '🏭 *لوحة التحكم النهائية*\n\n' +
+    '📥 أرسل الفيديو للتخزين (سيتم قصه تلقائياً).\n' +
     '📋 اكتب `/list` لعرض الفيديوهات المنتظرة.\n' +
-    '🚨 اكتب `/Sher` للنشر الفوري (تجاوز الوقت).\n\n' +
+    '🚨 اكتب `/Sher` للنشر الفوري.\n\n' +
     '👇 أرسل العنوان والوصف أولاً.',
     { parse_mode: 'Markdown' }
   );
@@ -156,7 +160,6 @@ bot.command('Sher', async (ctx) => {
       media: { body: driveStream.data }
     });
 
-    // الحذف الحتمي
     await drive.files.delete({ fileId: randomFile.id });
     
     await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ **تم النشر الفوري!**\n🎬 ${finalTitle}`, { parse_mode: 'Markdown' });
@@ -169,7 +172,6 @@ bot.command('Sher', async (ctx) => {
 
 // استقبال المعلومات
 bot.on('text', (ctx) => {
-  // نتجاهل الأوامر حتى لا يعتبرها عناوين
   if (ctx.message.text.startsWith('/')) return;
 
   const userId = ctx.from.id;
@@ -229,7 +231,7 @@ bot.on('video', async (ctx) => {
     
   } catch (error) {
     console.error(error);
-    ctx.reply(`❌ حدث خطأ: ${error.message}`);
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ حدث خطأ: ${error.message}`);
   }
 });
 
@@ -292,7 +294,6 @@ app.get('/cron-check', async (req, res) => {
       media: { body: driveStream.data }
     });
 
-    // الحذف الحتمي
     await drive.files.delete({ fileId: randomFile.id });
     await createLogFile(todayDate); 
 

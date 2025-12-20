@@ -1,8 +1,8 @@
 require('dotenv').config();
 
 // =========================================================
-// 💀 PROJECT: PHANTOM UPLOADER (Smart Metadata Edition) 💀
-// Features: JSON Metadata Injection + Auto-Delete + Smart List
+// 💀 PROJECT: DOOMSDAY BOT (The Final God Mode) 💀
+// Features: Hybrid Engine + Bulletproof List + Smart Sher
 // =========================================================
 
 const express = require('express');
@@ -17,24 +17,27 @@ const ffmpegPath = require('ffmpeg-static');
 const app = express();
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// --- 1. التجهيز القتالي للشبكة ---
+// --- 1. إعدادات الشبكة القتالية (Anti-Timeout) ---
+// زيادة المهلة لتجنب انقطاع الاتصال مع تيليجرام أو جوجل
 const httpsAgent = new (require('https').Agent)({ keepAlive: true, timeout: 600000 });
 bot.telegram.options.agent = httpsAgent;
 google.options({ agent: httpsAgent });
 
-// --- 2. تنظيف المخلفات ---
+// --- 2. تنظيف ساحة المعركة ---
 const tempDir = path.join(__dirname, 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+// حذف أي ملفات عالقة من الجلسة السابقة
 try { fs.readdirSync(tempDir).forEach(f => fs.unlinkSync(path.join(tempDir, f))); } catch(e){}
 
-// --- 3. اتصال جوجل ---
+// --- 3. اتصال جوجل (OAuth2) ---
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, process.env.REDIRECT_URI
 );
 oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
 
+// التجديد التلقائي للتوكن
 oauth2Client.on('tokens', (tokens) => {
-  if (tokens.refresh_token) console.log('🔄 Token Updated.');
+  if (tokens.refresh_token) console.log('🔄 Google Token Refreshed.');
   oauth2Client.setCredentials(tokens);
 });
 
@@ -42,19 +45,23 @@ const drive = google.drive({ version: 'v3', auth: oauth2Client });
 const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 
 const userSessions = new Map();
-const STORAGE_FOLDER = 'Smart_Shorts_Vault'; // الخزنة الذكية
+const STORAGE_FOLDER = 'Smart_Shorts_Vault'; 
 
 // ========================================================
 // ⚡ المحرك الهجين (The Hybrid Engine)
 // ========================================================
 function processVideoSmartly(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    // المحاولة 1: النسخ المباشر (سرعة الضوء)
+    // الخطة أ: النسخ المباشر (Stream Copy) - يستغرق ثانية واحدة
+    console.log('⚡ Trying Zero-Latency Copy...');
     const copyCmd = `"${ffmpegPath}" -y -i "${inputPath}" -t 59 -c copy -map 0 "${outputPath}"`;
+
     exec(copyCmd, (error) => {
-      if (!error) resolve(outputPath);
-      else {
-        // المحاولة 2: الضغط السريع (لإصلاح المشاكل)
+      if (!error) {
+        resolve(outputPath);
+      } else {
+        // الخطة ب: الضغط السريع (Ultrafast Encode) - إذا فشل النسخ
+        console.warn('⚠️ Copy failed, switching to fallback encode...');
         const encodeCmd = `"${ffmpegPath}" -y -i "${inputPath}" -t 59 -c:v libx264 -preset ultrafast -crf 28 -c:a aac "${outputPath}"`;
         exec(encodeCmd, (err) => {
           if (err) reject(err); else resolve(outputPath);
@@ -65,18 +72,19 @@ function processVideoSmartly(inputPath, outputPath) {
 }
 
 // ========================================================
-// 🎮 مركز التحكم (The Brain)
+// 🎮 مركز القيادة (Bot Commands)
 // ========================================================
 
-bot.start((ctx) => ctx.reply('🧠 **نظام النشر الذكي**\n\n1️⃣ أرسل التفاصيل (العنوان...)\n2️⃣ أرسل الفيديو\n3️⃣ /list (لعرض العناوين)\n4️⃣ /Sher (نشر + حذف)'));
+bot.start((ctx) => ctx.reply('💀 **DOOMSDAY BOT ONLINE**\n\n1️⃣ أرسل التفاصيل (العنوان...)\n2️⃣ أرسل الفيديو\n3️⃣ /list (عرض الخزنة)\n4️⃣ /Sher (نشر + حذف)'));
 
-// --- 1. استقبال البيانات وحفظها في الذاكرة المؤقتة ---
+// --- 1. استقبال النص (العنوان والوصف) ---
 bot.on('text', (ctx) => {
   if(ctx.message.text.startsWith('/')) return;
   
   const lines = ctx.message.text.split('\n');
   let title = '', desc = '', tags = '';
 
+  // تحليل ذكي للنص
   lines.forEach(line => {
       if(line.includes('العنوان:')) title = line.split(':')[1].trim();
       else if(line.includes('الوصف:')) desc = line.split(':')[1].trim();
@@ -86,21 +94,22 @@ bot.on('text', (ctx) => {
 
   if (title) {
     userSessions.set(ctx.from.id, { userId: ctx.from.id, title, description: desc, hashtags: tags });
-    ctx.reply(`💾 **تم حفظ البيانات:** "${title}"\n🎥 أرسل الفيديو الآن لدمجه مع هذه البيانات.`);
+    ctx.reply(`💾 **تم الحفظ:** "${title}"\n🎥 أرسل الفيديو الآن.`);
   } else {
-    ctx.reply('⚠️ التنسيق:\nالعنوان: اسم الفيديو\nالوصف: ...\n#هاشتاغات');
+    ctx.reply('⚠️ الصيغة:\nالعنوان: ...\nالوصف: ...\n#هاشتاغات');
   }
 });
 
-// --- 2. معالجة الفيديو + حقن البيانات (The Injection) ---
+// --- 2. استقبال الفيديو (المعالجة والتخزين) ---
 bot.on('video', async (ctx) => {
   const userId = ctx.from.id;
   const session = userSessions.get(userId);
 
-  if (!session) return ctx.reply('⚠️ أرسل العنوان والتفاصيل أولاً!');
-  if (ctx.message.video.file_size > 50 * 1024 * 1024) return ctx.reply('❌ الفيديو كبير جداً (Max 50MB).');
+  if (!session) return ctx.reply('⚠️ أرسل التفاصيل أولاً!');
+  // حماية السيرفر من الملفات الكبيرة (ريندر يفصل عند استهلاك الذاكرة)
+  if (ctx.message.video.file_size > 50 * 1024 * 1024) return ctx.reply('❌ الفيديو أكبر من 50MB.');
 
-  let msg = await ctx.reply('⚡ جاري المعالجة وحقن البيانات...');
+  let msg = await ctx.reply('⚡ جاري المعالجة (Hybrid Engine)...');
   
   const uniqueId = `${Date.now()}_${userId}`;
   const inputPath = path.join(tempDir, `in_${uniqueId}.mp4`);
@@ -113,22 +122,22 @@ bot.on('video', async (ctx) => {
     // المعالجة
     await processVideoSmartly(inputPath, outputPath);
 
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '☁️ تخزين في الكبسولة السحابية...');
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '☁️ تخزين في الكبسولة...');
     const folderId = await getOrCreateFolder(STORAGE_FOLDER);
     
-    // 🔥🔥 السحر هنا: تخزين البيانات داخل وصف الملف 🔥🔥
+    // كبسولة البيانات (تخزين العنوان داخل الملف)
     const metadataCapsule = JSON.stringify(session);
 
     await drive.files.create({
         resource: { 
-            name: `SMART_VIDEO_${uniqueId}.mp4`, 
+            name: `VIDEO_${uniqueId}.mp4`, 
             parents: [folderId], 
-            description: metadataCapsule // <--- هنا يتم حفظ العنوان والوصف داخل الملف
+            description: metadataCapsule 
         },
         media: { mimeType: 'video/mp4', body: fs.createReadStream(outputPath) }
     });
 
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ **تم التخزين بنجاح!**\nالعنوان المحفوظ: ${session.title}\nاستخدم /list للتأكد.`);
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ **تم التخزين!**\nالعنوان: ${session.title}\nتأكد عبر /list`);
   
   } catch (e) {
     console.error(e);
@@ -138,13 +147,13 @@ bot.on('video', async (ctx) => {
   }
 });
 
-// --- 3. الأمر /list (قراءة الكبسولات) ---
+// --- 3. الأمر LIST (المصفح ضد الأخطاء) ---
 bot.command('list', async (ctx) => {
-  const msg = await ctx.reply('🔍 جاري فك تشفير الكبسولات...');
+  const msg = await ctx.reply('🔍 فحص الخزنة...');
   try {
     const folderId = await getOrCreateFolder(STORAGE_FOLDER);
     
-    // نطلب الحقل 'description' خصيصاً لأنه يحتوي على الكنز
+    // جلب الوصف ضروري
     const res = await drive.files.list({
       q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
       pageSize: 20,
@@ -152,30 +161,29 @@ bot.command('list', async (ctx) => {
     });
 
     const files = res.data.files;
-    if (!files.length) return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '📦 الخزنة فارغة.');
+    if (!files || !files.length) return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '📦 الخزنة فارغة.');
 
-    let text = `📦 **الفيديوهات الجاهزة (${files.length}):**\n\n`;
+    let text = `📦 **المخزون (${files.length}):**\n\n`;
     
     files.forEach((f, i) => {
-        let title = "عنوان مجهول";
-        try {
-            // فك تشفير البيانات المحقونة
-            const meta = JSON.parse(f.description);
-            if (meta && meta.title) title = meta.title;
-        } catch(e) {
-            title = f.name; // في حال لم يكن هناك وصف، نستخدم اسم الملف
+        let displayTitle = f.name; // الافتراضي
+        if (f.description) {
+            try {
+                const meta = JSON.parse(f.description);
+                if (meta.title) displayTitle = meta.title;
+            } catch (e) { /* تجاهل الخطأ واستخدم الاسم */ }
         }
-        text += `🎬 ${i+1}. **${title}**\n`;
+        text += `🎬 ${i+1}. **${displayTitle}**\n`;
     });
 
-    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, text, { parse_mode: 'Markdown' });
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, text, { parse_mode: 'Markdown' });
   } catch (e) {
     console.error(e);
-    ctx.reply('❌ خطأ في القراءة.');
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ خطأ: ${e.message}`);
   }
 });
 
-// --- 4. الأمر /Sher (نشر + حذف) ---
+// --- 4. الأمر SHER (النشر + الحذف الآمن) ---
 bot.command('Sher', async (ctx) => {
   const msg = await ctx.reply('🚀 **جاري النشر...**');
   try {
@@ -191,14 +199,19 @@ bot.command('Sher', async (ctx) => {
     // اختيار عشوائي
     const file = listRes.data.files[Math.floor(Math.random() * listRes.data.files.length)];
     
-    // استخراج البيانات
-    let meta = { title: 'Short Video', description: '', hashtags: '#shorts' };
-    try { meta = JSON.parse(file.description); } catch(e){}
+    // استخراج البيانات بذكاء
+    let meta = { title: file.name.replace('.mp4',''), description: '', hashtags: '#shorts' };
+    if (file.description) {
+        try { meta = { ...meta, ...JSON.parse(file.description) }; } catch(e){}
+    }
 
-    // تجهيز العنوان والوصف
+    // تجهيز العنوان (قص لـ 100 حرف)
     let finalTitle = meta.title;
-    if (!finalTitle.includes('#')) finalTitle += ' #shorts';
-    const fullDesc = `${finalTitle}\n\n${meta.description}\n\n${meta.hashtags}\n\nSubscribe! #viral`;
+    if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #shorts';
+    if (finalTitle.length > 100) finalTitle = finalTitle.substring(0, 90) + '... #shorts';
+
+    // الوصف
+    const fullDesc = `${finalTitle}\n\n${meta.description}\n\n${meta.hashtags}\n\nSubscribe! #viral`.substring(0, 4900);
 
     await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `📡 رفع: **${finalTitle}**...`);
 
@@ -208,30 +221,31 @@ bot.command('Sher', async (ctx) => {
       part: 'snippet,status',
       requestBody: {
         snippet: {
-          title: finalTitle.substring(0, 99),
-          description: fullDesc.substring(0, 4900),
+          title: finalTitle,
+          description: fullDesc,
           categoryId: '24',
-          tags: ["shorts", "viral", "asmr"]
+          tags: ["shorts", "viral"]
         },
         status: { privacyStatus: 'public', selfDeclaredMadeForKids: false }
       },
       media: { body: stream.data }
     });
 
-    // 🔥🔥🔥 الحذف النهائي (الميزة المطلوبة) 🔥🔥🔥
-    await drive.files.delete({ fileId: file.id });
-    console.log(`🗑️ Deleted file ${file.id} from Drive.`);
-
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅🔥 **تم النشر والحذف من الخزنة!**\n\n🔗 [شاهد الفيديو](${`https://youtube.com/shorts/${ytRes.data.id}`})`, { parse_mode: 'Markdown' });
+    // الحذف الآمن (فقط بعد النجاح)
+    if (ytRes.data.id) {
+        await drive.files.delete({ fileId: file.id });
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅🔥 **تم النشر والحذف!**\n🔗 https://youtube.com/shorts/${ytRes.data.id}`);
+    }
 
   } catch (e) {
     console.error(e);
-    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل: ${e.message}`);
+    const errText = e.response?.data?.error?.message || e.message;
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل: ${errText}`);
   }
 });
 
 // ========================================================
-// 🔧 الأدوات المساعدة
+// 🔧 الأدوات الخلفية
 // ========================================================
 
 let folderCache = {};
@@ -250,11 +264,12 @@ async function downloadVideo(url, dest) {
   return new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
 }
 
+// تشغيل السيرفر (نقطة حياة لـ UptimeRobot)
 app.use(express.json());
 app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => { bot.handleUpdate(req.body); res.sendStatus(200); });
-app.get('/', (req, res) => res.send('🧠 Smart Metadata Bot is Active.'));
+app.get('/', (req, res) => res.send('💀 DOOMSDAY BOT IS ACTIVE.'));
 
-process.on('uncaughtException', (err) => console.log('🛡️ Error Caught:', err.message));
+process.on('uncaughtException', (err) => console.log('🛡️ Crash Prevented:', err.message));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {

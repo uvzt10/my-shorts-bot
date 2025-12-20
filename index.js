@@ -1,4 +1,3 @@
-S., [ديسمبر ⁨20⁩، ⁨2025⁩ في ⁨8:12 AM⁩]
 require('dotenv').config();
 
 // TelegramToYouTube - The "Perfect" Edition 💎
@@ -70,7 +69,7 @@ async function triggerUpload(todayDate, manualChatId = null) {
   try {
     const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
     const listRes = await drive.files.list({
-      q: '${folderId}' in parents and mimeType contains 'video/' and trashed = false,
+      q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
       fields: 'files(id, name, description)',
       pageSize: 100
     });
@@ -90,9 +89,9 @@ async function triggerUpload(todayDate, manualChatId = null) {
     let finalTitle = metadata.title;
     if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #shorts';
     const staticDesc = "Satisfying video #shorts #asmr #cutting";
-    let fullDescription = ${finalTitle}\n\n${metadata.description}\n\n${staticDesc}.trim();
+    let fullDescription = `${finalTitle}\n\n${metadata.description}\n\n${staticDesc}`.trim();
 
-    console.log(🎬 Uploading: ${finalTitle});
+    console.log(`🎬 Uploading: ${finalTitle}`);
 
     const driveStream = await drive.files.get({ fileId: randomFile.id, alt: 'media' }, { responseType: 'stream' });
 
@@ -116,3 +115,204 @@ async function triggerUpload(todayDate, manualChatId = null) {
     if (!manualChatId) {
         await createLogFile(todayDate);
     }
+
+    // === إرسال الإشعار ===
+    const videoUrl = `https://youtube.com/shorts/${youtubeRes.data.id}`;
+    const notifyUser = manualChatId || metadata.userId; // نرسل للطالب اليدوي أو صاحب الفيديو الأصلي
+
+    if (notifyUser) {
+      try {
+        await bot.telegram.sendMessage(
+          notifyUser, 
+          `🚀 **تم النشر بنجاح!**\n\n` +
+          `🎬 **العنوان:** ${finalTitle}\n` +
+          `🔗 **الرابط:** ${videoUrl}`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (err) { console.error('Notify Error:', err.message); }
+    }
+
+    console.log('🎉 Published Successfully!');
+
+  } catch (error) {
+    console.error('Upload Error:', error);
+    if (manualChatId) bot.telegram.sendMessage(manualChatId, `❌ خطأ: ${error.message}`);
+  }
+}
+
+// ====================
+// 3. دوال المعالجة (HD)
+// ====================
+
+function convertToShorts(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    console.log('🎬 Starting FFmpeg (HD)...');
+    const command = `"${ffmpegPath}" -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset superfast -crf 23 -maxrate 5M -bufsize 10M -c:a aac "${outputPath}"`;
+    exec(command, { maxBuffer: 1024 * 1024 * 60 }, (error, stdout, stderr) => {
+      if (error) { reject(error); } else { resolve(outputPath); }
+    });
+  });
+}
+
+// ====================
+// 4. أوامر البوت
+// ====================
+
+bot.start((ctx) => ctx.reply('🏭 *البوت المتكامل*\nيعمل تلقائياً الساعة 6م (NY) + إشعارات.'));
+
+bot.command('list', async (ctx) => {
+  const msg = await ctx.reply('🔍 جاري الفحص...');
+  try {
+    const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
+    const listRes = await drive.files.list({
+      q: `'${folderId}' in parents and mimeType contains 'video/' and trashed = false`,
+      pageSize: 50
+    });
+    const files = listRes.data.files;
+    if (files.length === 0) return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '📦 الخزنة فارغة.');
+    
+    let message = `📦 *المحفوظات (${files.length}):*\n\n`;
+    files.forEach((file, index) => {
+        let title = file.name;
+        try { title = JSON.parse(file.description).title; } catch(e){}
+        message += `${index + 1}. 🎬 ${title}\n`;
+    });
+    if (message.length > 4000) message = message.substring(0, 4000);
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, message);
+  } catch (error) {
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '❌ خطأ.');
+  }
+});
+
+// النشر اليدوي
+bot.command('Sher', async (ctx) => {
+  ctx.reply('🚨 جاري النشر الفوري...');
+  // نمرر ChatID لنرسل الرد لنفس الشخص الذي طلب
+  await triggerUpload(moment().format('YYYY-MM-DD'), ctx.chat.id);
+});
+
+bot.on('text', (ctx) => {
+  if (ctx.message.text.startsWith('/')) return;
+  const text = ctx.message.text;
+  const userId = ctx.from.id;
+
+  const titleMatch = text.match(/العنوان:\s*(.+)/i) || text.match(/title:\s*(.+)/i);
+  const descMatch = text.match(/الوصف:\s*(.+)/i) || text.match(/description:\s*(.+)/i);
+  const hashtagsMatch = text.match(/الهاشتاغات:\s*(.+)/i) || text.match(/hashtags:\s*(.+)/i);
+
+  if (titleMatch || descMatch || hashtagsMatch) {
+    const sessionData = {
+      userId: userId,
+      title: titleMatch ? titleMatch[1].trim() : 'Satisfying Video',
+      description: descMatch ? descMatch[1].trim() : '',
+      hashtags: hashtagsMatch ? hashtagsMatch[1].trim() : '' 
+    };
+    userSessions.set(userId, sessionData);
+    ctx.reply('✅ تم حفظ البيانات! أرسل الفيديو 📥');
+  } else {
+    ctx.reply('⚠️ أرسل المعلومات أولاً.');
+  }
+});
+
+bot.on('video', async (ctx) => {
+  const userId = ctx.from.id;
+  let sessionData = userSessions.get(userId);
+  if (!sessionData) sessionData = { userId: userId, title: 'Satisfying Video', description: '', hashtags: '' };
+
+  const video = ctx.message.video;
+  const msg = await ctx.reply('⏳ جاري المعالجة (HD)...');
+
+  try {
+    const fileLink = await ctx.telegram.getFileLink(video.file_id);
+    const originalPath = await downloadVideo(fileLink.href, `raw_${video.file_id}`);
+    const processedPath = path.join(__dirname, 'temp', `processed_${video.file_id}.mp4`);
+
+    await convertToShorts(originalPath, processedPath);
+
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '☁️ رفع للدرايف...');
+    const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
+    const metadataString = JSON.stringify(sessionData);
+    
+    await drive.files.create({
+      resource: {
+        name: `READY_${Date.now()}.mp4`,
+        parents: [folderId],
+        description: metadataString
+      },
+      media: { mimeType: 'video/mp4', body: fs.createReadStream(processedPath) },
+      fields: 'id'
+    });
+
+    fs.unlinkSync(originalPath);
+    fs.unlinkSync(processedPath);
+
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بنجاح!');
+  } catch (error) {
+    console.error(error);
+    try { if(fs.existsSync(originalPath)) fs.unlinkSync(originalPath); } catch(e){}
+    try { if(fs.existsSync(processedPath)) fs.unlinkSync(processedPath); } catch(e){}
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل.`);
+  }
+});
+
+// دوال مساعدة
+async function checkIfUploadedToday(dateString) {
+  const logsFolderId = await getOrCreateFolder(LOGS_FOLDER_NAME);
+  const res = await drive.files.list({
+    q: `'${logsFolderId}' in parents and name = 'LOG_${dateString}.txt' and trashed = false`
+  });
+  return res.data.files.length > 0;
+}
+
+async function createLogFile(dateString) {
+  const logsFolderId = await getOrCreateFolder(LOGS_FOLDER_NAME);
+  await drive.files.create({
+    resource: { name: `LOG_${dateString}.txt`, parents: [logsFolderId] },
+    media: { mimeType: 'text/plain', body: 'Done.' }
+  });
+}
+
+async function getOrCreateFolder(folderName) {
+  const res = await drive.files.list({
+    q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`
+  });
+  if (res.data.files.length > 0) return res.data.files[0].id;
+  const folder = await drive.files.create({
+    resource: { name: folderName, mimeType: 'application/vnd.google-apps.folder' }
+  });
+  return folder.data.id;
+}
+
+async function downloadVideo(url, fileName) {
+  const tempDir = path.join(__dirname, 'temp');
+  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+  const videoPath = path.join(tempDir, `${fileName}.mp4`);
+  const response = await axios({ method: 'GET', url: url, responseType: 'stream' });
+  const writer = fs.createWriteStream(videoPath);
+  response.data.pipe(writer);
+  return new Promise((resolve, reject) => {
+    writer.on('finish', () => resolve(videoPath));
+    writer.on('error', reject);
+  });
+}
+
+app.use(express.json());
+app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
+  bot.handleUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// صفحة بسيطة لإبقاء البوت حياً (تزورها Cron Job)
+app.get('/', (req, res) => res.send('Bot is Awake & Running Internally ⚡'));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, async () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  try {
+    const webhookUrl = `${process.env.WEBHOOK_URL}/webhook/${process.env.TELEGRAM_BOT_TOKEN}`;
+    await bot.telegram.setWebhook(webhookUrl);
+    console.log(`✅ Webhook set to: ${webhookUrl}`);
+  } catch (err) {
+    console.error('❌ Failed to set webhook:', err);
+  }
+});

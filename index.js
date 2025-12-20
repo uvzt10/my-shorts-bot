@@ -1,7 +1,8 @@
 require('dotenv').config();
 
-// TelegramToYouTube - The "Perfect" Edition 💎
-// المميزات: فحص تلقائي داخلي + إشعارات + قص HD + تخزين درايف
+// =========================================================
+// 💎 PROJECT: OLD STRUCTURE + INFERNAL QUALITY (CRF 18) 💎
+// =========================================================
 
 const express = require('express');
 const { Telegraf } = require('telegraf');
@@ -16,8 +17,7 @@ const ffmpegPath = require('ffmpeg-static');
 const app = express();
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-// زيادة مهلة الاتصال
-bot.telegram.options.agent = new (require('https').Agent)({ keepAlive: true, timeout: 60000 });
+// ❌ تم حذف سطر الـ Agent لأنه يسبب تعليق البوت في Render ❌
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -29,6 +29,12 @@ oauth2Client.setCredentials({
   refresh_token: process.env.GOOGLE_REFRESH_TOKEN
 });
 
+// تجديد التوكن
+oauth2Client.on('tokens', (tokens) => {
+  if (tokens.refresh_token) console.log('🔄 Token Refreshed.');
+  oauth2Client.setCredentials(tokens);
+});
+
 const drive = google.drive({ version: 'v3', auth: oauth2Client });
 const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 
@@ -36,35 +42,35 @@ const userSessions = new Map();
 const STORAGE_FOLDER_NAME = 'Random_Shorts_Storage'; 
 const LOGS_FOLDER_NAME = 'Daily_Upload_Logs'; 
 
-// ====================
-// 1. المنبه الداخلي (هو يفحص الوقت بنفسه) ⏰
-// ====================
+// تنظيف التمب عند التشغيل
+const tempDir = path.join(__dirname, 'temp');
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+try { fs.readdirSync(tempDir).forEach(f => fs.unlinkSync(path.join(tempDir, f))); } catch(e){}
 
-// يفحص الوقت كل 60 ثانية تلقائياً
+// ====================
+// 1. المنبه الداخلي
+// ====================
 setInterval(async () => {
   const nowNY = moment().tz("America/New_York");
   const currentHour = nowNY.hour(); 
   
-  // لكي لا نملأ السجلات، نطبع فقط عندما تكون الساعة قريبة من 18
   if (currentHour === 18) {
-    console.log('🔄 Internal Clock: It is 6 PM in NY. Checking upload status...');
-    
+    console.log('🔄 Internal Clock: 6 PM NY. Checking...');
     const todayDate = nowNY.format('YYYY-MM-DD');
     const isUploaded = await checkIfUploadedToday(todayDate);
     
     if (!isUploaded) {
-      console.log('🚀 Starting Auto-Upload Sequence...');
+      console.log('🚀 Starting Auto-Upload...');
       await triggerUpload(todayDate);
     } else {
       console.log('✅ Already uploaded today.');
     }
   }
-}, 60000); // كل دقيقة
+}, 60000); 
 
 // ====================
-// 2. دالة النشر الموحدة (للتلقائي واليدوي)
+// 2. دالة النشر
 // ====================
-
 async function triggerUpload(todayDate, manualChatId = null) {
   try {
     const folderId = await getOrCreateFolder(STORAGE_FOLDER_NAME);
@@ -76,17 +82,15 @@ async function triggerUpload(todayDate, manualChatId = null) {
 
     if (!listRes.data.files.length) {
       if (manualChatId) bot.telegram.sendMessage(manualChatId, '⚠️ الخزنة فارغة!');
-      console.log('⚠️ Storage empty.');
       return;
     }
 
-    // سحب عشوائي
     const randomFile = listRes.data.files[Math.floor(Math.random() * listRes.data.files.length)];
     
     let metadata = { userId: null, title: 'Short', description: '', hashtags: '' };
     try { metadata = JSON.parse(randomFile.description); } catch(e) {}
 
-    let finalTitle = metadata.title;
+    let finalTitle = metadata.title || randomFile.name;
     if (!finalTitle.toLowerCase().includes('#shorts')) finalTitle += ' #shorts';
     const staticDesc = "Satisfying video #shorts #asmr #cutting";
     let fullDescription = `${finalTitle}\n\n${metadata.description}\n\n${staticDesc}`.trim();
@@ -111,20 +115,18 @@ async function triggerUpload(todayDate, manualChatId = null) {
 
     await drive.files.delete({ fileId: randomFile.id });
     
-    // تسجيل في السجل اليومي (فقط إذا كان نشراً تلقائياً أو أردنا منعه لبقية اليوم)
     if (!manualChatId) {
         await createLogFile(todayDate);
     }
 
-    // === إرسال الإشعار ===
     const videoUrl = `https://youtube.com/shorts/${youtubeRes.data.id}`;
-    const notifyUser = manualChatId || metadata.userId; // نرسل للطالب اليدوي أو صاحب الفيديو الأصلي
+    const notifyUser = manualChatId || metadata.userId;
 
     if (notifyUser) {
       try {
         await bot.telegram.sendMessage(
           notifyUser, 
-          `🚀 **تم النشر بنجاح!**\n\n` +
+          `🚀 **تم النشر بجودة خرافية!**\n\n` +
           `🎬 **العنوان:** ${finalTitle}\n` +
           `🔗 **الرابط:** ${videoUrl}`,
           { parse_mode: 'Markdown' }
@@ -141,15 +143,22 @@ async function triggerUpload(todayDate, manualChatId = null) {
 }
 
 // ====================
-// 3. دوال المعالجة (HD)
+// 3. دوال المعالجة (الجودة الجهنمية 🔥)
 // ====================
-
 function convertToShorts(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    console.log('🎬 Starting FFmpeg (HD)...');
-    const command = `"${ffmpegPath}" -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset superfast -crf 23 -maxrate 5M -bufsize 10M -c:a aac "${outputPath}"`;
+    console.log('🔥 Starting FFmpeg (INFERNAL QUALITY)...');
+    
+    // التعديل هنا: CRF 18 (جودة خرافية) + 8M Bitrate + Veryfast Preset
+    const command = `"${ffmpegPath}" -y -i "${inputPath}" -vf "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" -t 59 -c:v libx264 -preset veryfast -crf 18 -maxrate 8M -bufsize 16M -c:a aac -b:a 192k -ar 48000 "${outputPath}"`;
+    
     exec(command, { maxBuffer: 1024 * 1024 * 60 }, (error, stdout, stderr) => {
-      if (error) { reject(error); } else { resolve(outputPath); }
+      if (error) { 
+          console.error('FFmpeg Error:', stderr);
+          reject(error); 
+      } else { 
+          resolve(outputPath); 
+      }
     });
   });
 }
@@ -158,7 +167,7 @@ function convertToShorts(inputPath, outputPath) {
 // 4. أوامر البوت
 // ====================
 
-bot.start((ctx) => ctx.reply('🏭 *البوت المتكامل*\nيعمل تلقائياً الساعة 6م (NY) + إشعارات.'));
+bot.start((ctx) => ctx.reply('🏭 *البوت المتكامل (جودة 4K)*\nيعمل تلقائياً الساعة 6م (NY).'));
 
 bot.command('list', async (ctx) => {
   const msg = await ctx.reply('🔍 جاري الفحص...');
@@ -184,10 +193,8 @@ bot.command('list', async (ctx) => {
   }
 });
 
-// النشر اليدوي
 bot.command('Sher', async (ctx) => {
   ctx.reply('🚨 جاري النشر الفوري...');
-  // نمرر ChatID لنرسل الرد لنفس الشخص الذي طلب
   await triggerUpload(moment().format('YYYY-MM-DD'), ctx.chat.id);
 });
 
@@ -220,7 +227,10 @@ bot.on('video', async (ctx) => {
   if (!sessionData) sessionData = { userId: userId, title: 'Satisfying Video', description: '', hashtags: '' };
 
   const video = ctx.message.video;
-  const msg = await ctx.reply('⏳ جاري المعالجة (HD)...');
+  // منع الملفات الكبيرة جداً لكي لا ينفجر السيرفر مع الجودة العالية
+  if (video.file_size > 48 * 1024 * 1024) return ctx.reply('❌ الفيديو كبير جداً (Max 48MB).');
+
+  const msg = await ctx.reply('⏳ جاري المعالجة (INFERNAL QUALITY)...');
 
   try {
     const fileLink = await ctx.telegram.getFileLink(video.file_id);
@@ -246,12 +256,12 @@ bot.on('video', async (ctx) => {
     fs.unlinkSync(originalPath);
     fs.unlinkSync(processedPath);
 
-    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بنجاح!');
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, '✅ تم التخزين بجودة خرافية!');
   } catch (error) {
     console.error(error);
     try { if(fs.existsSync(originalPath)) fs.unlinkSync(originalPath); } catch(e){}
     try { if(fs.existsSync(processedPath)) fs.unlinkSync(processedPath); } catch(e){}
-    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل.`);
+    ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ فشل: ${error.message}`);
   }
 });
 
@@ -302,8 +312,7 @@ app.post(`/webhook/${process.env.TELEGRAM_BOT_TOKEN}`, (req, res) => {
   res.sendStatus(200);
 });
 
-// صفحة بسيطة لإبقاء البوت حياً (تزورها Cron Job)
-app.get('/', (req, res) => res.send('Bot is Awake & Running Internally ⚡'));
+app.get('/', (req, res) => res.send('Bot is Awake & Running ⚡'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
